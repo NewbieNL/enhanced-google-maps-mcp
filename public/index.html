@@ -5,7 +5,108 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Google Maps MCP</title>
     <style>
-        /* ... [previous styles remain the same] ... */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            height: 100vh;
+        }
+
+        .sidebar {
+            background: #f5f5f5;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .search-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .results-container {
+            flex: 1;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            padding-right: 10px;
+        }
+
+        .place-card, .direction-step {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .place-card:hover {
+            transform: translateY(-2px);
+        }
+
+        input, select, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 100%;
+        }
+
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #357abd;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: #e0e0e0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .tab.active {
+            background: #4285f4;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
 
         .map-controls {
             position: absolute;
@@ -40,20 +141,66 @@
             border-color: #999;
         }
 
-        /* Traffic icon styles */
-        .traffic-icon {
-            width: 16px;
-            height: 16px;
-            display: inline-block;
-            vertical-align: middle;
-            color: #666;
+        /* Custom scrollbar */
+        .results-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .results-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .results-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .results-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="sidebar">
-            <!-- ... [previous sidebar content remains the same] ... -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('places')">Places</button>
+                <button class="tab" onclick="switchTab('directions')">Directions</button>
+            </div>
+
+            <div id="places-tab" class="tab-content active">
+                <div class="search-container">
+                    <input type="text" id="location" placeholder="Enter location">
+                    <select id="placeType">
+                        <option value="">All types</option>
+                        <option value="restaurant">Restaurants</option>
+                        <option value="cafe">Cafes</option>
+                        <option value="bar">Bars</option>
+                        <option value="park">Parks</option>
+                        <option value="museum">Museums</option>
+                        <option value="shopping_mall">Shopping Malls</option>
+                    </select>
+                    <input type="number" id="radius" placeholder="Radius in meters" value="1000">
+                    <button onclick="searchPlaces()">Search Places</button>
+                </div>
+                <div id="places-results" class="results-container"></div>
+            </div>
+
+            <div id="directions-tab" class="tab-content">
+                <div class="search-container">
+                    <input type="text" id="origin" placeholder="Enter origin">
+                    <input type="text" id="destination" placeholder="Enter destination">
+                    <select id="mode">
+                        <option value="driving">Driving</option>
+                        <option value="walking">Walking</option>
+                        <option value="bicycling">Bicycling</option>
+                        <option value="transit">Transit</option>
+                    </select>
+                    <button onclick="getDirections()">Get Directions</button>
+                </div>
+                <div id="directions-results" class="results-container"></div>
+            </div>
         </div>
         <div id="map-container" style="position: relative;">
             <div class="map-controls">
@@ -103,7 +250,121 @@
             }
         }
 
-        // ... [rest of the JavaScript functions remain the same] ...
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            document.querySelector(`button[onclick="switchTab('${tab}')"]`).classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+            
+            clearMap();
+        }
+
+        function clearMap() {
+            markers.forEach(marker => marker.setMap(null));
+            markers = [];
+            if (directionsRenderer) {
+                directionsRenderer.setDirections({ routes: [] });
+            }
+        }
+
+        async function searchPlaces() {
+            const location = document.getElementById('location').value;
+            const type = document.getElementById('placeType').value;
+            const radius = document.getElementById('radius').value;
+
+            try {
+                const response = await fetch(`/places?location=${encodeURIComponent(location)}&type=${type}&radius=${radius}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                displayPlaces(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function displayPlaces(data) {
+            clearMap();
+            const resultsDiv = document.getElementById('places-results');
+            resultsDiv.innerHTML = '';
+
+            data.results.forEach((place, index) => {
+                // Create marker
+                const marker = new google.maps.Marker({
+                    position: place.geometry.location,
+                    map: map,
+                    title: place.name,
+                    label: (index + 1).toString()
+                });
+                markers.push(marker);
+
+                // Create place card
+                const placeCard = document.createElement('div');
+                placeCard.className = 'place-card';
+                placeCard.innerHTML = `
+                    <h3>${index + 1}. ${place.name}</h3>
+                    <p>${place.vicinity}</p>
+                    <p>Rating: ${place.rating || 'N/A'}</p>
+                `;
+
+                placeCard.addEventListener('click', () => {
+                    map.panTo(marker.getPosition());
+                    map.setZoom(15);
+                });
+
+                resultsDiv.appendChild(placeCard);
+            });
+
+            if (data.results.length > 0) {
+                const bounds = new google.maps.LatLngBounds();
+                markers.forEach(marker => bounds.extend(marker.getPosition()));
+                map.fitBounds(bounds);
+            }
+        }
+
+        async function getDirections() {
+            const origin = document.getElementById('origin').value;
+            const destination = document.getElementById('destination').value;
+            const mode = document.getElementById('mode').value;
+
+            try {
+                const response = await fetch(`/directions?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&mode=${mode}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                displayDirections(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function displayDirections(data) {
+            clearMap();
+            const resultsDiv = document.getElementById('directions-results');
+            resultsDiv.innerHTML = '';
+
+            if (data.routes.length > 0) {
+                const route = data.routes[0];
+                directionsRenderer.setDirections(data);
+
+                route.legs[0].steps.forEach((step, index) => {
+                    const stepDiv = document.createElement('div');
+                    stepDiv.className = 'direction-step';
+                    stepDiv.innerHTML = `
+                        <p>${index + 1}. ${step.html_instructions}</p>
+                        <small>${step.distance.text} - ${step.duration.text}</small>
+                    `;
+                    resultsDiv.appendChild(stepDiv);
+                });
+            }
+        }
 
         window.onload = initMap;
     </script>
